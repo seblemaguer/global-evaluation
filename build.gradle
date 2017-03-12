@@ -1,0 +1,162 @@
+plugins {
+    id 'distribution'
+    id 'maven-publish'
+    id "groovy"
+}
+
+repositories {
+    ['cloudark', 'localhost'].each { hostname ->
+        maven {
+            url "http://$hostname:8081/artifactory/local"
+            credentials {
+                username = findProperty('cloudarkUser')
+                password = findProperty('cloudarkApiKey')
+            }
+        }
+    }
+}
+
+ext {
+    labelsName = "mngu0_labels"
+    dataSets = [
+    "HMM":[
+        //
+        [name    : 'straight',
+        artifact: 'mngu0_straight-analysis'],
+        [name    : 'straight_ema',
+        artifact: 'mngu0_straight_ema-analysis'],
+        [name    : 'ema_tongue',
+        artifact: 'mngu0_ema_tongue-analysis'],
+        [name    : 'weights',
+        artifact: 'mngu0_weights-analysis'],
+        [name    : 'ema',
+        artifact: 'mngu0_ema-analysis']
+    ],
+
+    // DNN
+    "DNN": [
+        [name    : 'straight',
+        artifact: 'mngu0_straight_dnn-analysis'],
+        [name    : 'straight_ema',
+        artifact: 'mngu0_straight_ema_dnn-analysis'],
+        [name    : 'ema_tongue',
+        artifact: 'mngu0_ema_tongue_dnn-analysis'],
+        [name    : 'weights',
+        artifact: 'mngu0_weights_dnn-analysis'],
+        [name    : 'ema',
+        artifact: 'mngu0_ema_dnn-analysis']
+    ]]
+    dataVersion = '0.2-SNAPSHOT'
+}
+
+configurations {
+    data
+}
+
+sourceSets {
+    data
+}
+
+dependencies {
+    data group: 'org.m2ci.msp', name: labelsName, version: "0.1", ext: 'zip' // FIXME: hardcoded
+    dataSets["HMM"].each { dataSet ->
+        data group: 'org.m2ci.msp', name: dataSet.artifact, version: dataVersion, ext: 'zip', changing: true
+    }
+
+    dataSets["DNN"].each { dataSet ->
+        data group: 'org.m2ci.msp', name: dataSet.artifact, version: dataVersion, ext: 'zip', changing: true
+    }
+}
+
+processDataResources {
+    from configurations.data, {
+        filesMatching '*.zip', { zipFileDetails ->
+            logger.info "unzipping $zipFileDetails.file"
+            copy {
+                from zipTree(zipFileDetails.file)
+                into destinationDir
+                includeEmptyDirs = false
+            }
+            zipFileDetails.exclude()
+        }
+    }
+}
+
+
+dataSets.each { k, v ->
+    project.task("globalEvaluation$k") {
+        dependsOn processDataResources
+
+        doLast {
+            // BUI
+            exec {
+                def list_expes = []
+                dataSets[k].each { dataSet ->
+                    if (!dataSet.name.startsWith("straight")) {
+                        list_expes << "${dataSet.name}:./build/resources/data/${dataSet.artifact}-${dataVersion}/EMAAnalysis/dist_euc_ema_per_phoneme.rds"
+                    }
+                }
+                def list_expes_str = list_expes.join(",")
+                (new File("$buildDir/output/$k")).mkdirs()
+                commandLine 'Rscript', "utils/merge_euc_dist.R", "--expes=$list_expes_str", "--output=$buildDir/output/$k"
+            }
+        }
+    }
+
+    project.task("generateFigures$k") {
+        dependsOn "globalEvaluation$k"
+        ["x", "y", "z", "distance"].each { axis ->
+            outputs.files "$buildDir/output/$k/${axis}_dist.pdf"
+        }
+
+        doLast {
+            ["x", "y", "z", "distance"].each { axis ->
+                exec {
+                    workingDir "$buildDir/output/$k/"
+                    commandLine "pdflatex", "${axis}_dist.tex"
+                }
+            }
+        }
+    }
+}
+
+task generateFigures {
+    dataSets.each { k, v ->
+        dependsOn "generateFigures$k"
+    }
+}
+
+
+
+/***************************************************************************************************
+ *** Publishing part
+ ***************************************************************************************************/
+
+group "org.m2ci.msp"
+version '0.2-SNAPSHOT'
+
+distributions {
+    main {
+        contents {
+            from generateFigures
+            from "$buildDir/output"
+        }
+    }
+}
+
+publishing {
+    publications {
+        main(MavenPublication) {
+            artifact distZip
+        }
+    }
+    repositories {
+        maven {
+            url "http://cloudark:8081/artifactory/data-snapshot-local/"
+            credentials {
+                username = findProperty('cloudarkUser')
+                password = findProperty('cloudarkApiKey')
+            }
+        }
+    }
+}
