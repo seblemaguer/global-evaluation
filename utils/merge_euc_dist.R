@@ -12,7 +12,7 @@ Options:
 library(docopt)
 library(ggplot2)
 library(tikzDevice)
-
+library(plyr)
 
 # parse args
 args <- docopt(doc)
@@ -26,11 +26,16 @@ for (e in strsplit(args$expes, ",")[[1]])
     # Load expes data
     tmp <- readRDS(infos[2])
     tmp$expe <- infos[1]
+    # tmp$expe <- revalue(as.factor(tmp$expe), c("ema_tongue" = "ema-tongue"))
+    # tmp$expe <- revalue(as.factor(tmp$expe), c("weights" = "tm"))
 
     # Add the expe data to the common pot
     data.all <- rbind(data.all, tmp)
 }
 
+data.all$value <- data.all$value * 10
+data.all$expe <- revalue(as.factor(data.all$expe), c("ema_tongue" = "ema-tongue"))
+data.all$expe <- revalue(as.factor(data.all$expe), c("weights" = "tm"))
 
 for (cur_axis in c("x", "y", "z", "distance"))
 {
@@ -42,12 +47,12 @@ for (cur_axis in c("x", "y", "z", "distance"))
 
     ylim1 = boxplot.stats(data$value)$stats[c(1, 5)]
     p <- ggplot(data) +
-        geom_boxplot(aes(x=expe, y=value, color=expe),,outlier.colour = NA) +
+        geom_boxplot(aes(x=expe, y=value, fill=expe),,outlier.colour = NA) +
         facet_grid(coil ~ phone_class, scales = "free_y") +
         theme_bw() +
         theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
-        theme(legend.position = "bottom") +
-        labs(x = "Experimental setup", y = "Euclidian distance (mm)", colour="") +
+        theme(legend.position = "none") +
+        labs(x = "Experimental setup", y = "Euclidean distance (mm)", colour="") +
         coord_cartesian(ylim = ylim1*1.2)
 
     options(tikzDocumentDeclaration = "\\documentclass{IEEEtran}\n")
